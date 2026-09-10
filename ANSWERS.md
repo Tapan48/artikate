@@ -396,6 +396,43 @@ This can supply ordered candidates and stop after enough matches for a limit. It
 
 Build the chosen index with `CONCURRENTLY` outside a transaction block, then refresh statistics and compare plans. Concurrent construction permits normal writes but still performs substantial work, waits for relevant transactions, consumes resources, and can leave an invalid index if it fails; inspect the build and `pg_index.indisvalid` before declaring success. If managed through Django, use an appropriate non-atomic concurrent-index migration. This answer does not run an index migration against Part A. See the [PostgreSQL 15 CREATE INDEX documentation](https://www.postgresql.org/docs/15/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY).
 
+### C3. Expected `EXPLAIN (ANALYZE, BUFFERS)` results
+
+Capture the original query, the rewritten query without the new index, and the rewritten query with the candidate index. Use the same parameters and comparable data, load, cache conditions, and session settings. `EXPLAIN ANALYZE` executes the SELECT, so collect a production-sized baseline on a suitable replica or controlled run; do not casually add an expensive diagnostic to an already overloaded reporting screen.
+
+Before the change, I would expect a sequential or parallel sequential scan over much of `checkouts`, filtering on the date expression and null return time, a join against active employees, and a sort on due date. This is not guaranteed: if very few employees are active, the existing employee FK index may already support a different plan. A sort can spill to temporary files if the result and row width exceed its memory allowance.
+
+After the change, **if the open/date filter is selective**, I would expect an index scan or a bitmap index scan plus bitmap heap scan using `checkouts_open_checked_out_at_idx`, followed by the active-employee join and a sort of the qualifying rows. A bitmap plan can be preferable when matches occupy many heap pages. A sequential scan can still be the correct choice for a broad result; I would not disable sequential scans to manufacture evidence of success.
+
+| Line or field to inspect | What would support the diagnosis/fix |
+| --- | --- |
+| `Index Cond: ((checked_out_at >= ...) AND (checked_out_at < ...))` under the candidate index | The time restriction is being used to locate candidates, rather than only being evaluated as a residual date-cast filter. This demonstrates index use, not performance improvement by itself. |
+| Scan-node `actual rows`, `Rows Removed by Filter`, and `Buffers: shared hit/read` | Fewer unnecessary rows/blocks examined than the baseline. Bitmap rechecks and residual employee filtering may still exist; an index does not promise zero filtering or heap access. |
+| Estimated `rows` versus actual rows, with `loops` accounted for | Large discrepancies suggest stale statistics, skew, or correlation assumptions that can cause a bad join/scan choice. Per-loop values must not be confused with total work, particularly in nested or parallel plans. |
+| `Sort Method`, memory/disk usage, and `Buffers: temp read/written` | Whether the sort stays in memory or spills. The date-first index does not inherently remove the sort or reduce its input if the original already filtered before sorting. |
+| Final `Execution Time: ... ms` | The direct server execution-time comparison. This must improve under comparable conditions; seeing an index name alone is not enough. |
+
+The most specific mechanism check is the **timestamp `Index Cond` on the candidate scan**. The success check is lower measured execution time and resource work for the same result. I would also measure endpoint p95 latency with realistic concurrency: EXPLAIN does not include sending the full result to the application, Python serialization, or the client's network time. An improved SQL plan can therefore still miss the screen's ten-second timeout. The [EXPLAIN guide](https://www.postgresql.org/docs/15/using-explain.html) describes the plan and execution measurements.
+
+### C4. What breaks as the table grows?
+
+At 8,000 inserts/day, the table adds about **2.92 million rows per 365-day year**, reaching roughly 7.12 million after a year if nothing is removed. I would expect reporting latency and I/O or sort pressure to become a user-visible limit before a raw row-count limit, but the exact first bottleneck depends on how many loans remain open and how many results the screen retrieves.
+
+For this literal, fixed January–June window, later normal checkouts do not necessarily increase the result size. The original broad scan still becomes more expensive as unrelated history grows. A selective timestamp/partial index can avoid much of that growth; a rolling date range or growing unresolved-loan population has a different cost profile. I would measure the open backlog rather than assume that every new row remains in the partial index.
+
+My sequence would be:
+
+1. **Bound interactive work.** Agree pagination and a narrower projection for the screen where possible. Use an export job for the complete historical result. Track database time separately from serialization and response size; raising the HTTP timeout only hides the symptom.
+2. **Keep statistics and cleanup effective.** Watch scan plans, table/index size, dead tuples, last analyze/vacuum, long-running transactions, and temp-file I/O. Returning assets updates rows and removes live membership from the partial index; vacuum must reclaim obsolete versions. Tune table-specific autovacuum/analyze thresholds from observed churn instead of waiting for large-table defaults to react. Avoid treating a global `work_mem` increase as free memory: multiple sorts and concurrent sessions multiply its cost. See [routine vacuuming](https://www.postgresql.org/docs/15/routine-vacuuming.html).
+3. **Control retained history when there is a real need.** Establish retention and archive only closed loans under an agreed policy. Account for foreign keys and notices; do not delete open loans to make the report fast. Monitor storage headroom and backup/restore duration as well as request latency.
+4. **Partition only when pruning or lifecycle management earns the complexity.** Date partitioning by `checked_out_at` could prune other periods and make archival cheaper, but 4.2 million rows alone does not justify a migration. In PostgreSQL 15, a partitioned table's unique/primary-key constraint must include the partition key, so preserving an ID-only key and references to checkout IDs needs a deliberate redesign. Partitioning is not a drop-in replacement for the current schema. BRIN can be worth measuring for large, physically time-correlated history, but it is lossy, does not provide due-date order, and is not my first fix for selective open loans. See [partitioning limitations](https://www.postgresql.org/docs/15/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS).
+
+### C5. One measurement before committing to the recommendation
+
+I would measure the **joint selectivity of the open-loan, checkout-date, and active-employee filters** on the real data: how many rows remain after each filter, and especially the number of open loans inside this date window that belong to active employees. Collect that alongside the actual plan's row estimates and blocks touched.
+
+The same total table size can mean a tiny result in a mostly returned history, or a huge open backlog spanning most of the requested interval. Those cases favor different scans and can change whether a date-led, employee-led, or order-led index earns its cost. Looking only at the percentage of open rows is insufficient if the dates and active-employee status are correlated. Without that distribution and a representative plan, I cannot promise that my candidate will be chosen, that it will beat a sequential scan, or that the endpoint will meet a particular latency target.
+
 ## Part D
 
 Not completed yet. This document currently contains Parts B and C.
