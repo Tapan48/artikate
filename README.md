@@ -4,10 +4,10 @@ Part A of the Artikate backend assignment: an authenticated Django REST API for 
 
 ## Start from a clean clone
 
-Prerequisites: Git, Docker Desktop (running), and Docker Compose v2. No host Python or PostgreSQL installation is needed. Replace `<repository-url>` with this repository's URL after it is published.
+Prerequisites: Git, Docker Desktop (running), and Docker Compose v2. No host Python or PostgreSQL installation is needed.
 
 ```sh
-git clone <repository-url> artikate
+git clone https://github.com/Tapan48/artikate.git artikate
 cd artikate
 cp .env.example .env
 docker compose up -d --build
@@ -137,4 +137,6 @@ docker compose -p artikate-rehearsal down
 
 Part A's implementation and automated verification are included. The stack is intended for the local assignment demo; internet-facing deployment, TLS, per-user authorization roles, and production scheduler separation are outside this implementation. Parts B–D and `ANSWERS.md` are not included because this work is limited to Part A.
 
-Screen recording link: **not recorded yet**. Follow [DEMO.md](DEMO.md) for the required 6–8 minute walkthrough, including the clean startup, live API, passing tests, and a design tradeoff. The candidate should narrate their own understanding and add the recording link here. A remote repository has not been configured or published.
+Public repository: [Tapan48/artikate](https://github.com/Tapan48/artikate). The `main` branch preserves the incremental implementation commits, including the container-permissions fix.
+
+Screen recording link: **not recorded yet**. Follow [DEMO.md](DEMO.md) for the required 6–8 minute walkthrough, including the clean startup, live API, passing tests, and a design tradeoff. The candidate should narrate their own understanding and add the recording link here.
