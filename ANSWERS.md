@@ -449,3 +449,15 @@ I would use **three application deploys**, with separately controlled migration 
 4. **Deploy 3: simplify.** Remove obsolete null fallbacks after a monitoring/rollback window. Rollback targets must still write locations.
 
 Use short `lock_timeout` and retry DDL. `ADD COLUMN`/`SET NOT NULL` still need brief **ACCESS EXCLUSIVE** locks; an unassisted `SET NOT NULL` scan or backfill inside the same DDL transaction could hold that lock for the entire operation. Validation uses a less restrictive lock, not zero locking. [PostgreSQL ALTER TABLE](https://www.postgresql.org/docs/15/sql-altertable.html).
+
+### D2. Latency triage
+
+I would first locate where the 25 seconds are spent, rather than assume the unchanged application code means an unchanged system.
+
+1. **Confirm scope:** compare p50/p95, request rate, error rate, page parameters, response sizes, and all four instances against yesterday. Correlate request IDs across load-balancer and application timings. This separates one expensive page, one unhealthy instance, and a system-wide slowdown; also check configuration, infrastructure, and scheduled-job changes.
+2. **Separate queueing from execution:** inspect Gunicorn busy workers, restarts/timeouts, database connection counts, and connection-acquisition time. Waiting for a worker or connection can consume the request budget before SQL starts. A timeout before a URI is read is not evidence of a slow overdue query.
+3. **Inspect PostgreSQL waits:** use `pg_stat_activity`, `wait_event_type`, transaction age, and `pg_blocking_pids()`. Identify actual blockers before cancelling anything. Ordinary row locks do not normally block this plain SELECT under MVCC; an incompatible DDL lock can.
+4. **Time both report queries:** distinguish the pagination COUNT from the joined page SELECT. Compare historical `pg_stat_statements` data if available, then obtain a controlled representative `EXPLAIN (ANALYZE, BUFFERS)`. Check estimates versus actual rows, scan choice, heap blocks, sort spills, dead tuples, and analyze/vacuum history. Avoid repeatedly running a 25-second diagnostic on the hot database.
+5. **Correlate capacity:** inspect CPU, disk latency, memory, temporary files, connection saturation, and overlapping Celery/reporting jobs. This distinguishes inefficient SQL from otherwise-normal SQL competing for resources.
+
+My two leading hypotheses are **data/statistics growth making the count or page plan expensive**, confirmed by increased scanned rows/blocks or changed estimates/plans; and **traffic or scheduled-workload saturation**, confirmed by queue/wait metrics aligned with workload timing. These remain hypotheses until those measurements agree. [PostgreSQL monitoring statistics](https://www.postgresql.org/docs/15/monitoring-stats.html).
