@@ -30,7 +30,9 @@ def main():
     from lending.tasks import flag_overdue_checkouts
 
     base = os.environ.get("SMOKE_BASE_URL", "http://127.0.0.1:8000/api/v1")
-    user, _ = get_user_model().objects.get_or_create(username="smoke-reviewer")
+    user, _ = get_user_model().objects.get_or_create(
+        username="smoke-reviewer", defaults={"password": "!"}
+    )
     token, _ = Token.objects.get_or_create(user=user)
     employee = Employee.objects.get(employee_code="DEMO-E01")
 
