@@ -40,11 +40,23 @@ class CheckOut(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["asset"], condition=Q(returned_at__isnull=True), name="one_open_checkout_per_asset"),
+            models.UniqueConstraint(
+                fields=["asset"],
+                condition=Q(returned_at__isnull=True),
+                name="one_open_checkout_per_asset",
+            ),
         ]
         indexes = [
-            models.Index(fields=["employee"], condition=Q(returned_at__isnull=True), name="open_checkout_employee_idx"),
-            models.Index(fields=["due_at", "id"], condition=Q(returned_at__isnull=True), name="open_checkout_due_idx"),
+            models.Index(
+                fields=["employee"],
+                condition=Q(returned_at__isnull=True),
+                name="open_checkout_employee_idx",
+            ),
+            models.Index(
+                fields=["due_at", "id"],
+                condition=Q(returned_at__isnull=True),
+                name="open_checkout_due_idx",
+            ),
         ]
 
 
@@ -55,5 +67,7 @@ class OverdueNotice(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["checkout", "notice_date"], name="one_notice_per_checkout_date"),
+            models.UniqueConstraint(
+                fields=["checkout", "notice_date"], name="one_notice_per_checkout_date"
+            ),
         ]

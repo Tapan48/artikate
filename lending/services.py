@@ -18,13 +18,19 @@ def check_out_asset(*, asset_tag, employee_code, due_at):
         with transaction.atomic():
             # All lending mutations lock employee -> asset -> checkout. The employee
             # lock serializes the count check even when requests target different assets.
-            employee = get_object_or_404(Employee.objects.select_for_update(), employee_code=employee_code)
+            employee = get_object_or_404(
+                Employee.objects.select_for_update(), employee_code=employee_code
+            )
             asset = get_object_or_404(Asset.objects.select_for_update(), asset_tag=asset_tag)
             now = timezone.now()
             if not employee.is_active:
-                raise ValidationError({"employee_code": "Inactive employees cannot check out assets."})
+                raise ValidationError(
+                    {"employee_code": "Inactive employees cannot check out assets."}
+                )
             if not now < due_at <= now + timedelta(days=30):
-                raise ValidationError({"due_at": "Must be in the future and no more than 30 days ahead."})
+                raise ValidationError(
+                    {"due_at": "Must be in the future and no more than 30 days ahead."}
+                )
             if asset.status != Asset.Status.AVAILABLE:
                 raise Conflict("Asset is not available.")
             if CheckOut.objects.filter(employee=employee, returned_at__isnull=True).count() >= 3:
@@ -35,7 +41,10 @@ def check_out_asset(*, asset_tag, employee_code, due_at):
             return checkout
     except IntegrityError as exc:
         # Catch outside atomic so the transaction has rolled back before responding.
-        if getattr(getattr(exc.__cause__, "diag", None), "constraint_name", None) == "one_open_checkout_per_asset":
+        if (
+            getattr(getattr(exc.__cause__, "diag", None), "constraint_name", None)
+            == "one_open_checkout_per_asset"
+        ):
             raise Conflict("Asset already has an open check-out.") from exc
         raise
 

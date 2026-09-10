@@ -6,7 +6,16 @@ from .models import Asset, CheckOut
 class AssetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Asset
-        fields = ["id", "asset_tag", "name", "category", "status", "purchase_date", "created_at", "updated_at"]
+        fields = [
+            "id",
+            "asset_tag",
+            "name",
+            "category",
+            "status",
+            "purchase_date",
+            "created_at",
+            "updated_at",
+        ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate_status(self, value):
@@ -45,7 +54,17 @@ class CheckOutSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CheckOut
-        fields = ["id", "asset", "asset_tag", "employee", "employee_code", "checked_out_at", "due_at", "returned_at", "condition_note"]
+        fields = [
+            "id",
+            "asset",
+            "asset_tag",
+            "employee",
+            "employee_code",
+            "checked_out_at",
+            "due_at",
+            "returned_at",
+            "condition_note",
+        ]
         read_only_fields = fields
 
 
@@ -58,7 +77,15 @@ class OverdueSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CheckOut
-        fields = ["id", "asset_name", "asset_tag", "employee_code", "employee_name", "due_at", "days_overdue"]
+        fields = [
+            "id",
+            "asset_name",
+            "asset_tag",
+            "employee_code",
+            "employee_name",
+            "due_at",
+            "days_overdue",
+        ]
 
     def get_days_overdue(self, obj):
         return (self.context["now"] - obj.due_at).days

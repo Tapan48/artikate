@@ -33,10 +33,14 @@ def employee_factory(db):
 
     def create(**kwargs):
         number = next(sequence)
-        return Employee.objects.create(**{
-            "employee_code": f"EMP-{number}", "full_name": f"Employee {number}",
-            "email": f"employee{number}@example.test", **kwargs,
-        })
+        return Employee.objects.create(
+            **{
+                "employee_code": f"EMP-{number}",
+                "full_name": f"Employee {number}",
+                "email": f"employee{number}@example.test",
+                **kwargs,
+            }
+        )
 
     return create
 
@@ -47,10 +51,15 @@ def asset_factory(db):
 
     def create(**kwargs):
         number = next(sequence)
-        return Asset.objects.create(**{
-            "asset_tag": f"ASSET-{number}", "name": f"Asset {number}",
-            "category": Asset.Category.CAMERA, "purchase_date": date(2025, 1, 1), **kwargs,
-        })
+        return Asset.objects.create(
+            **{
+                "asset_tag": f"ASSET-{number}",
+                "name": f"Asset {number}",
+                "category": Asset.Category.CAMERA,
+                "purchase_date": date(2025, 1, 1),
+                **kwargs,
+            }
+        )
 
     return create
 
@@ -60,9 +69,14 @@ def checkout_factory(asset_factory, employee_factory):
     def create(*, asset=None, employee=None, checked_out_at=None, **kwargs):
         asset = asset or asset_factory()
         employee = employee or employee_factory()
-        checkout = CheckOut.objects.create(**{
-            "asset": asset, "employee": employee, "due_at": timezone.now() + timedelta(days=1), **kwargs,
-        })
+        checkout = CheckOut.objects.create(
+            **{
+                "asset": asset,
+                "employee": employee,
+                "due_at": timezone.now() + timedelta(days=1),
+                **kwargs,
+            }
+        )
         if checked_out_at is not None:
             CheckOut.objects.filter(pk=checkout.pk).update(checked_out_at=checked_out_at)
             checkout.refresh_from_db()

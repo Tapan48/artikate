@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +36,12 @@ def test_notice_batches_recover_after_partial_failure(asset_factory, employee_fa
     employee = employee_factory()
     now = timezone.now()
     assets = [asset_factory(status=Asset.Status.CHECKED_OUT) for _ in range(1001)]
-    CheckOut.objects.bulk_create([CheckOut(asset=asset, employee=employee, due_at=now - timedelta(days=1)) for asset in assets])
+    CheckOut.objects.bulk_create(
+        [
+            CheckOut(asset=asset, employee=employee, due_at=now - timedelta(days=1))
+            for asset in assets
+        ]
+    )
     original = OverdueNotice.objects.bulk_create
     calls = 0
 
@@ -61,7 +67,9 @@ def test_seed_repeatable_preserves_data(asset_factory, employee_factory):
     call_command("seed_demo_data")
     now = timezone.now()
     assert Asset.objects.filter(asset_tag__startswith="DEMO-").count() == 8
-    assert set(Asset.objects.filter(asset_tag__startswith="DEMO-").values_list("category", flat=True)) == set(Asset.Category.values)
+    assert set(
+        Asset.objects.filter(asset_tag__startswith="DEMO-").values_list("category", flat=True)
+    ) == set(Asset.Category.values)
     assert Employee.objects.filter(employee_code__startswith="DEMO-").count() == 4
     assert Employee.objects.filter(employee_code__startswith="DEMO-", is_active=False).count() == 1
     assert CheckOut.objects.filter(returned_at__isnull=True, due_at__lt=now).count() == 2
@@ -74,4 +82,6 @@ def test_seed_repeatable_preserves_data(asset_factory, employee_factory):
     unrelated.refresh_from_db()
     assert unrelated.name == "Unrelated asset"
     assert Employee.objects.filter(pk=unrelated_employee.pk).exists()
-    assert not CheckOut.objects.filter(asset__status=Asset.Status.AVAILABLE, returned_at__isnull=True).exists()
+    assert not CheckOut.objects.filter(
+        asset__status=Asset.Status.AVAILABLE, returned_at__isnull=True
+    ).exists()

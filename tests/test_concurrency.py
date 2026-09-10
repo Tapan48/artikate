@@ -6,6 +6,7 @@ from django.db import close_old_connections, connection, connections
 from rest_framework.test import APIClient
 
 from lending.models import Asset, CheckOut
+
 from .test_checkouts import payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -52,7 +53,9 @@ def test_same_asset_exactly_one_success(token, asset_factory, employee_factory):
     assert asset.status == Asset.Status.CHECKED_OUT
 
 
-def test_same_employee_cannot_exceed_limit(token, asset_factory, employee_factory, checkout_factory):
+def test_same_employee_cannot_exceed_limit(
+    token, asset_factory, employee_factory, checkout_factory
+):
     employee = employee_factory()
     for _ in range(2):
         checkout_factory(employee=employee)

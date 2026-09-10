@@ -27,7 +27,10 @@ class AssetListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = Asset.objects.order_by("id")
-        for field, choices in [("status", Asset.Status.values), ("category", Asset.Category.values)]:
+        for field, choices in [
+            ("status", Asset.Status.values),
+            ("category", Asset.Category.values),
+        ]:
             value = self.request.query_params.get(field)
             if value is not None:
                 if value not in choices:
@@ -42,7 +45,11 @@ class AssetListCreateView(generics.ListCreateAPIView):
 class AssetDetailView(generics.RetrieveAPIView):
     serializer_class = AssetDetailSerializer
     queryset = Asset.objects.prefetch_related(
-        Prefetch("checkouts", queryset=CheckOut.objects.filter(returned_at__isnull=True).select_related("employee"), to_attr="open_checkouts")
+        Prefetch(
+            "checkouts",
+            queryset=CheckOut.objects.filter(returned_at__isnull=True).select_related("employee"),
+            to_attr="open_checkouts",
+        )
     )
 
 
@@ -76,9 +83,15 @@ class EmployeeSummaryView(APIView):
             currently_held_count=Count("checkouts", filter=held),
             currently_overdue_count=Count("checkouts", filter=held & Q(checkouts__due_at__lt=now)),
             mean_hold_duration_days=Coalesce(
-                Avg(seconds / Value(86400.0), filter=Q(checkouts__returned_at__isnull=False)), Value(0.0)
+                Avg(seconds / Value(86400.0), filter=Q(checkouts__returned_at__isnull=False)),
+                Value(0.0),
             ),
-        ).values("lifetime_checkout_count", "currently_held_count", "currently_overdue_count", "mean_hold_duration_days")
+        ).values(
+            "lifetime_checkout_count",
+            "currently_held_count",
+            "currently_overdue_count",
+            "mean_hold_duration_days",
+        )
         return Response(get_object_or_404(queryset, employee_code=employee_code))
 
 
@@ -87,7 +100,11 @@ class OverdueReportView(generics.ListAPIView):
 
     def get_queryset(self):
         self.report_now = timezone.now()
-        return CheckOut.objects.filter(returned_at__isnull=True, due_at__lt=self.report_now).select_related("asset", "employee").order_by("due_at", "id")
+        return (
+            CheckOut.objects.filter(returned_at__isnull=True, due_at__lt=self.report_now)
+            .select_related("asset", "employee")
+            .order_by("due_at", "id")
+        )
 
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "now": self.report_now}
