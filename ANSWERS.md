@@ -324,6 +324,78 @@ Django explains why [`on_commit()` callbacks are not part of the database transa
 
 Existing `tests/test_tasks_and_seed.py` and the live smoke script verify Part A's notice uniqueness, date boundary, batch recovery, and actual Redis/worker path. They **do not** verify the proposed email outbox, provider contract, or inbox delivery. Those require the migration, provider adapter, and failure-injection tests described here before deploying an email extension.
 
-## Parts C and D
+## Part C — Optimise the PostgreSQL reporting query
 
-Not completed yet. This document currently contains Part B only.
+This section uses the **Part C schema and index baseline printed in the assignment**, not the extra indexes already added to the Part A Django models. The stated eight-second runtime and 4.2-million-row dataset are supplied facts; there is no production dump or execution plan available here. Proposed plan shapes and production benefits are hypotheses to validate, not measured production results.
+
+### C1. Rewrite the query and explain the changes
+
+Assumption: the report's January–June calendar dates are defined in **UTC**, consistent with Part A. First confirm the production session's `SHOW TimeZone` and the report's intended business timezone. `DATE(timestamptz)` depends on the session timezone, so replacing it with UTC bounds is equivalent only when UTC is the intended original date interpretation.
+
+```sql
+SELECT
+    c.id,
+    c.asset_id,
+    c.employee_id,
+    c.checked_out_at,
+    c.due_at,
+    c.returned_at,
+    c.condition_note
+FROM checkouts AS c
+JOIN employees AS e ON e.id = c.employee_id
+WHERE c.checked_out_at >= TIMESTAMPTZ '2026-01-01 00:00:00+00'
+  AND c.checked_out_at <  TIMESTAMPTZ '2026-07-01 00:00:00+00'
+  AND c.returned_at IS NULL
+  AND e.is_active = TRUE
+ORDER BY c.due_at ASC, c.id ASC;
+```
+
+| Change | Benefit and cost or qualification |
+| --- | --- |
+| Compare the original timestamp column to bounds instead of applying `DATE()` to every row | Makes a normal timestamp B-tree range scan possible and avoids the per-row date conversion. The rewrite alone does not create an index; the original baseline has no index on `checked_out_at`. |
+| Use a half-open interval ending at July 1 | Includes all of June 30, including fractional seconds, and excludes exactly July 1. Using `<= '2026-06-30'` as a timestamp would lose most of that last day. |
+| Use explicitly typed, timezone-aware bounds | Makes the interpretation reproducible. For a report in another timezone, compute that zone's local January 1 and July 1 midnights as UTC instants, then bind them as `timestamptz` parameters. Convert the bounds, not every stored timestamp. |
+| Express the active-employee condition as a join on the employee primary key | Makes the relationship explicit without multiplying checkout rows because `employees.id` is unique. The original `IN` is uncorrelated and PostgreSQL can already plan it as a semi-join or equivalent join; I do **not** claim the rewrite automatically makes that part faster. |
+| List all seven supplied checkout columns explicitly | Preserves the original returned values and avoids accidentally including employee columns or future schema additions. It does **not** reduce row width while all original columns, including `condition_note`, are retained. Remove large notes only after confirming that the screen does not require them. |
+| Add `id` as a tie-breaker | Gives deterministic order for equal due dates. The original did not specify tie ordering; rows and primary due-date ordering remain the same. Sorting an additional key has a small cost. |
+
+For example, an Asia/Kolkata report would use `TIMESTAMP '2026-01-01 00:00:00' AT TIME ZONE 'Asia/Kolkata'` and the corresponding July 1 expression as its bounds. Compute each local boundary independently for zones with daylight-saving changes. PostgreSQL documents the relevant [timestamp/timezone semantics](https://www.postgresql.org/docs/15/datatype-datetime.html#DATATYPE-TIMEZONES).
+
+I have deliberately kept the full result set. Adding `LIMIT 20` would change the original query's contract. For an interactive screen I would separately introduce pagination, preferably a `(due_at, id)` keyset cursor for deep traversal, and move a full export into an export workflow. That is a product/API change, not a silent SQL optimization. Concurrent data changes still need a defined snapshot/export policy.
+
+### C2. Indexes to add, and why
+
+My first candidate is **one partial B-tree index**, assuming most historical checkouts have been returned:
+
+```sql
+CREATE INDEX CONCURRENTLY checkouts_open_checked_out_at_idx
+    ON checkouts (checked_out_at)
+    WHERE returned_at IS NULL;
+```
+
+It restricts the index to the workload's open loans and permits a range search within that subset. If open loans are a small share of history, it is smaller than indexing every checkout, and returned history does not keep accumulating live entries in it. Returning an item still changes index membership and creates cleanup work; this is not a free index. If most rows remain open or the date window selects most of them, the benefit can be much smaller. The query contains the same literal `returned_at IS NULL` predicate; parameterizing the date bounds does not obscure that predicate. See [PostgreSQL's partial-index rules](https://www.postgresql.org/docs/15/indexes-partial.html).
+
+I would **not add all plausible indexes**. These are the decisions behind the initial choice:
+
+- **Not `(checked_out_at, due_at)` merely to remove the sort.** The leading key has a range condition, not equality. Entries are ordered by checkout time first, so the index does not supply global due-date order across the six-month range. Adding `due_at` increases size/write cost while the final sort can remain. PostgreSQL 15's [multicolumn B-tree rules](https://www.postgresql.org/docs/15/indexes-multicolumn.html) explain the importance of leading keys.
+- **Not `(returned_at, checked_out_at)` as the first choice.** That full composite index can support the filters, but it retains returned history that this query never needs. It may earn its cost for other return-date queries; the supplied workload does not establish that need.
+- **Not a standalone `employees(is_active)` index by default.** Twelve thousand employees are small enough that a sequential scan plus a hash of active IDs may be cheaper, especially if most are active. The primary key already supports ID lookups. The printed unique employee code/email constraints imply their own supporting indexes, but neither helps this filter. I would not duplicate them or the existing FK indexes.
+- **Not an expression index on `DATE(checked_out_at)`.** The raw `timestamptz`-to-date conversion depends on session timezone and is not immutable for an index expression. A fixed-timezone expression can be indexed, but it couples the index and query to that expression when direct timestamp bounds solve this case more simply.
+- **Not a covering index containing every selected column.** Including a potentially large `condition_note` bloats the index and can hit index-tuple size limits. Frequently updated open rows also do not guarantee all-visible heap pages, so an index-only scan cannot be assumed even with all required columns included.
+
+If measurement shows a **small paginated result** is the actual workload and early due-order retrieval wins, test this alternative separately:
+
+```sql
+-- Conditional alternative for a separately agreed paginated query.
+CREATE INDEX CONCURRENTLY checkouts_open_due_id_idx
+    ON checkouts (due_at, id)
+    WHERE returned_at IS NULL;
+```
+
+This can supply ordered candidates and stop after enough matches for a limit. It cannot directly bound the scan by checkout date, so it may scan many open loans outside the requested date window or belonging to inactive employees. It is not an unconditional replacement for the date-first index. Similarly, if only a few employees are active, an employee-led plan might justify a partial `(employee_id, checked_out_at)` index; compare that plan before paying for another composite index. The initial recommendation remains the single date-range index.
+
+Build the chosen index with `CONCURRENTLY` outside a transaction block, then refresh statistics and compare plans. Concurrent construction permits normal writes but still performs substantial work, waits for relevant transactions, consumes resources, and can leave an invalid index if it fails; inspect the build and `pg_index.indisvalid` before declaring success. If managed through Django, use an appropriate non-atomic concurrent-index migration. This answer does not run an index migration against Part A. See the [PostgreSQL 15 CREATE INDEX documentation](https://www.postgresql.org/docs/15/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY).
+
+## Part D
+
+Not completed yet. This document currently contains Parts B and C.
