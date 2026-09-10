@@ -135,7 +135,7 @@ docker compose -p artikate-rehearsal down
 
 ## Known gaps and submission
 
-Part A's implementation and automated verification are included. The stack is intended for the local assignment demo; internet-facing deployment, TLS, per-user authorization roles, and production scheduler separation are outside this implementation. Parts B–D and `ANSWERS.md` are not included because this work is limited to Part A.
+Part A's implementation and automated verification are included. Part B's snippet diagnoses, corrected code, and verification approach are in [ANSWERS.md](ANSWERS.md). Parts C and D are not completed yet. The stack is intended for the local assignment demo; internet-facing deployment, TLS, per-user authorization roles, and production scheduler separation are outside this implementation. The email outbox discussed in Part B is a proposed correction to that snippet, not an email feature deployed in Part A.
 
 Public repository: [Tapan48/artikate](https://github.com/Tapan48/artikate). The `main` branch preserves the incremental implementation commits, including the container-permissions fix.
 
