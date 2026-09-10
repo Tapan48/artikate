@@ -435,6 +435,17 @@ I would measure the **joint selectivity of the open-loan, checkout-date, and act
 
 The same total table size can mean a tiny result in a mostly returned history, or a huge open backlog spanning most of the requested interval. Those cases favor different scans and can change whether a date-led, employee-led, or order-led index earns its cost. Looking only at the percentage of open rows is insufficient if the dates and active-employee status are correlated. Without that distribution and a representative plan, I cannot promise that my candidate will be chosen, that it will beat a sequential scan, or that the endpoint will meet a particular latency target.
 
-## Part D
+## Part D — Production reasoning
 
-Not completed yet. This document currently contains Parts B and C.
+These are proposed production procedures. The assignment asks for written answers; no production migration, deployment pipeline, or infrastructure change is being applied to the Part A demo.
+
+### D1. Zero-downtime migration
+
+I would use **three application deploys**, with separately controlled migration jobs and a resumable backfill. Assume `locations(id)` exists and the business-approved mapping from each checkout to a location is available; I would not invent a default location.
+
+1. **Deploy 1: expand and support both schemas.** Before rolling out code, add nullable `location_id bigint` without a default, add its FK as `NOT VALID`, and build its index concurrently outside a transaction. Align Django's migration state with those database operations. The new code writes valid locations and tolerates historical nulls. Old requests can still omit the column because it remains nullable; the unvalidated FK allows nulls but checks new non-null references.
+2. **Between deploys:** drain old requests across all four instances and replace any old workers or other writers. Backfill only null locations in primary-key batches, committing each batch and recording progress. Throttle against replication lag, locks, and I/O. Recheck the entire null population after the sweep; do not overwrite newer values.
+3. **Deploy 2: enforce.** With every writer supplying locations and no nulls remaining, add `CHECK (location_id IS NOT NULL) NOT VALID`, validate it and the FK, then `SET NOT NULL`. Keep the validated check until that command completes so PostgreSQL can skip its full-table null scan. Remove the redundant check separately and deploy the matching non-null Django field.
+4. **Deploy 3: simplify.** Remove obsolete null fallbacks after a monitoring/rollback window. Rollback targets must still write locations.
+
+Use short `lock_timeout` and retry DDL. `ADD COLUMN`/`SET NOT NULL` still need brief **ACCESS EXCLUSIVE** locks; an unassisted `SET NOT NULL` scan or backfill inside the same DDL transaction could hold that lock for the entire operation. Validation uses a less restrictive lock, not zero locking. [PostgreSQL ALTER TABLE](https://www.postgresql.org/docs/15/sql-altertable.html).
