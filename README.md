@@ -139,4 +139,4 @@ Part A's implementation and automated verification are included. [ANSWERS.md](AN
 
 Public repository: [Tapan48/artikate](https://github.com/Tapan48/artikate). The `main` branch preserves the incremental implementation commits, including the container-permissions fix.
 
-Screen recording: [Download the Part A walkthrough (MP4)](https://github.com/Tapan48/artikate/releases/download/part-a-recording/Artikate_recording.mp4). The recording is 3 minutes 10 seconds long, shorter than the assignment’s required 6–8 minutes. See [DEMO.md](DEMO.md) for the recording checklist.
+Screen recording: watch [Part 1 (3:10, MP4)](https://github.com/Tapan48/artikate/releases/download/part-a-recording/Artikate_recording.mp4), then [Part 2 (3:15, MP4)](https://github.com/Tapan48/artikate/releases/download/part-a-recording/artikate_part2.mp4). Combined duration: approximately **6 minutes 25 seconds** across two files. See [DEMO.md](DEMO.md) for the recording checklist.
